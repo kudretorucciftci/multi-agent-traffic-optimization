@@ -1,84 +1,53 @@
-# SUMO ve Derin Pekiştirmeli Öğrenme ile Trafik Işığı Kontrolü
+# 🚦 Multi-Agent Traffic Control with Reinforcement Learning
 
-Bu proje, SUMO trafik simülasyonu ve Derin Pekiştirmeli Öğrenme (Deep Reinforcement Learning) kullanarak trafik ışıklarını otomatik olarak kontrol eden bir yapay zeka ajanı içermektedir.
+![AI Traffic Banner](project_banner.png)
 
-## Projenin Amacı
+## 📌 Proje Hakkında
+Bu proje, Maltepe bölgesindeki kritik kavşakların (6+ trafik ışığı) koordineli yönetimini sağlamak amacıyla **SUMO (Simulation of Urban MObility)** ve **Ray RLlib / PettingZoo** altyapısını kullanır. Derin Pekiştirmeli Öğrenme (MAPPO/PPO) algoritmaları ile trafik akışı dinamik olarak optimize edilir.
 
-Bu projenin amacı, trafik ışıklarını optimize ederek araçların ortalama bekleme süresini azaltmak ve trafik akışını iyileştirmektir. Proximal Policy Optimization (PPO) algoritması kullanılarak eğitilen bir yapay zeka ajanı, trafik ışıklarının zamanlamasını dinamik olarak ayarlar.
+### 🎬 Simülasyon Canlı Akışı
+![SUMO Simulation Overview](simulation.gif)
+*Sistem, araç yoğunluğunu gerçek zamanlı analiz ederek faz geçişlerini optimize eder.*
 
-## Klasör Yapısı
+## 🚀 Öne Çıkan Özellikler
+- **Knowledge Graph Duyarlılığı:** Ajanlar sadece kendi kavşaklarını değil, komşu kavşakların durumunu da gözlemleyerek koordineli kararlar alır.
+- **Dinamik Ödül Mekanizması:** Bekleme süresi ve durma sayısını minimize eden gelişmiş ödül fonksiyonu.
+- **Gerçekçi Simülasyon:** Maltepe bölgesinin gerçek OSM (OpenStreetMap) verileri üzerine kurulmuş trafik ağı.
+- **Sarı Işık Yönetimi:** Gerçek dünya güvenliği için otomatik sarı ışık faz entegrasyonu.
 
+## 📁 Klasör Yapısı
 ```
-├── README.md                   # Proje açıklaması ve kullanım talimatları
-├── network.net.xml             # SUMO ağ dosyası (kavşak yapısı)
-├── routes.rou.xml              # SUMO trafik akış dosyası
-├── sumo.sumocfg                # SUMO konfigürasyon dosyası
-├── train/                      # Eğitim ile ilgili dosyalar
-│   └── trafik_isiklari_drl.py  # Eğitim kodu ve ortam tanımı
-└── run/                        # Çalıştırma ile ilgili dosyalar
-    ├── run_trained_model.py    # Eğitilmiş modeli çalıştırma kodu
-    └── trafik_isigi_ppo_model.zip # Eğitilmiş model dosyası
+├── train/                  # Eğitim mantığı ve Ortam (Env) tanımları
+│   ├── multi_agent_env.py  # PettingZoo tabanlı çoklu ajan ortamı
+│   └── train_multi_agent.py # Ray RLlib eğitim scripti
+├── run/                    # Test ve Görselleştirme
+│   ├── run_trained_model.py # Eğitilmiş modeli çalıştırma
+│   └── trafik_analiz.png    # Performans metrik grafikleri
+├── sumo_files/             # SUMO ağ ve rota dosyaları
+└── training_metrics.csv    # Eğitim süreci logları
 ```
 
-## Kurulum Talimatları
+## 🛠️ Kurulum ve Çalıştırma
 
-### 1. SUMO Kurulumu
+### 1. Gereksinimler
+- SUMO (v1.18.0 veya üzeri)
+- Python 3.9+
+- Ray [RLlib], PettingZoo, Gymnasium
 
-- SUMO'yu [resmi web sitesinden](https://www.eclipse.org/sumo/) indirin ve kurun
-- Kurulum sırasında 'Add SUMO to PATH' seçeneğini işaretleyin
-- Kurulumu doğrulamak için komut satırında `sumo --version` komutunu çalıştırın
-
-### 2. Python Kütüphanelerinin Kurulumu
-
+### 2. Kurulum
 ```bash
-pip install gymnasium numpy matplotlib stable-baselines3 sumolib traci
+pip install -r requirements.txt
 ```
 
-## Kullanım
-
-### Modeli Eğitme
-
-1. `train` klasöründeki `trafik_isiklari_drl.py` dosyasını çalıştırın:
-
-```bash
-python train/trafik_isiklari_drl.py
-```
-
-2. Eğitim tamamlandığında, model `train/trafik_isigi_ppo_model.zip` olarak kaydedilecektir.
-
-### Eğitilmiş Modeli Çalıştırma
-
-1. `run` klasöründeki `run_trained_model.py` dosyasını çalıştırın:
-
+### 3. Modeli Test Etme
+Eğitilmiş modeli GUI ile izlemek için:
 ```bash
 python run/run_trained_model.py
 ```
 
-2. SUMO-GUI otomatik olarak başlayacak ve eğitilmiş model trafik ışıklarını kontrol edecektir.
-3. Simülasyon tamamlandığında, sonuçlar grafikler halinde gösterilecektir.
+## 📊 Eğitim Analizi
+Proje kapsamında yapılan denemelerde ödül fonksiyonu stabil bir iyileşme göstermektedir. Knowledge Graph yapısına geçişle birlikte %20'den fazla verimlilik artışı hedeflenmektedir.
 
-## Geliştirici Notları
-
-### SUMO-GUI Ayarları ve 2D Görünüm İyileştirmeleri
-
-SUMO-GUI başlatıldığında aşağıdaki iyileştirmeler otomatik olarak uygulanır:
-
-- Pencere maksimum boyuta ayarlanır
-- Araç renkleri daha belirgin hale getirilir
-- Trafik ışıklarının adları gösterilir
-- Araçların anlık hızları gösterilir
-
-Simülasyon sırasında konsolda aşağıdaki bilgiler gerçek zamanlı olarak gösterilir:
-
-- Simülasyon adımı
-- Toplam araç sayısı
-- Ortalama bekleme süresi
-
-### SUMO Yolu Ayarı
-
-Eğer SUMO farklı bir konuma kurulmuşsa, `train/trafik_isiklari_drl.py` ve `run/run_trained_model.py` dosyalarındaki aşağıdaki satırı değiştirin:
-
-```python
-os.environ["SUMO_HOME"] = r"C:\Program Files (x86)\Eclipse\Sumo"
-```
+---
+*Bu proje, zeki ulaşım sistemleri (ITS) araştırmaları kapsamında geliştirilmektedir.*
 

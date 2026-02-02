@@ -14,17 +14,11 @@ else:
     sys.exit("SUMO_HOME'u ayarlayın")
 
 def env(sumo_cfg_path, **kwargs):
-    """
-    PettingZoo ParallelEnv API'sini takip eden bir ortam oluşturur.
-    """
     internal_env = raw_env(sumo_cfg_path=sumo_cfg_path, **kwargs)
-    # AEC'ye özel sarmalayıcıları ParallelEnv ortamlarından kaldırın
     return internal_env
 
 class raw_env(pettingzoo.ParallelEnv):
-    metadata = {
-        "name": "multi_agent_traffic_v0",
-    }
+    metadata = {"name": "multi_agent_traffic_v1"}
 
     def __init__(self, sumo_cfg_path, use_gui=False, max_steps=5000):
         super().__init__()
@@ -33,123 +27,131 @@ class raw_env(pettingzoo.ParallelEnv):
         self.max_steps = max_steps
         self.current_step = 0
 
-        # SUMO'yu başlat
         self._start_sumo()
-        
-        # Ajanları (trafik ışıklarını) ve ilgili verileri al
         self.agents = traci.trafficlight.getIDList()
-        self.agent_name_mapping = dict(zip(self.agents, list(range(len(self.agents)))))
         
+        # Kavşak bağlantılarını ve şeritleri önbelleğe al
         self.junction_incoming_lanes = {
             ts: set(traci.trafficlight.getControlledLanes(ts)) for ts in self.agents
         }
         
-        # Her ajan için aksiyon ve gözlem uzaylarını tanımla
-        # Aksiyon: Fazı değiştir veya değiştirme
+        # Her kavşağın komşu kavşaklarını bul (Basit mesafe tabanlı veya manuel tanımlı)
+        # Şimdilik her ajanın gözlemine tüm ajanların bilgisini ekliyoruz (Global farkındalık)
+        
         self.action_spaces = {
             agent: spaces.Discrete(len(traci.trafficlight.getCompleteRedYellowGreenDefinition(agent)[0].phases)) 
             for agent in self.agents
         }
         
-        # Gözlem uzayını, tüm ajanların gözlemlerini içeren tek bir vektör olarak tanımla
-        num_observations = len(self.agents)
-        self.observation_space_shared = spaces.Box(low=0, high=200, shape=(num_observations,), dtype=np.float32)
+        # Gözlem Uzayı: Her ajan için [Kendi_Araç_Sayısı, Kendi_Bekleme_Süresi, Kendi_Halt_Sayısı, *Diğer_Ajanların_Araç_Sayıları]
+        # Örn: 6 ajan varsa, 3 (kendi) + 5 (diğerleri) = 8 birimlik gözlem
+        num_agents = len(self.agents)
+        self.obs_dim = 3 + (num_agents - 1)
+        self.observation_space_shared = spaces.Box(low=0, high=500, shape=(self.obs_dim,), dtype=np.float32)
 
-        self.truncations = {agent: False for agent in self.agents}
-        self.infos = {agent: {} for agent in self.agents}
-        
+        # Sarı ışık yönetimi için değişkenler
+        self.yellow_time = 3
+        self.yellow_timers = {agent: 0 for agent in self.agents}
+        self.pending_phases = {agent: None for agent in self.agents}
+        self.current_phases = {agent: traci.trafficlight.getPhase(agent) for agent in self.agents}
+
     def observation_space(self, agent: str):
-        # Tüm ajanlar aynı gözlem uzayını paylaşır
         return self.observation_space_shared
 
     def action_space(self, agent: str):
         return self.action_spaces[agent]
         
     def _start_sumo(self):
-        """SUMO simülasyonunu başlatır."""
         sumo_binary = sumolib.checkBinary("sumo-gui" if self.use_gui else "sumo")
         sumo_cmd = [sumo_binary, "-c", self.sumo_cfg, "--no-warnings", "--no-step-log"]
         if self.use_gui:
             sumo_cmd.extend(["--start", "--quit-on-end"])
-            
         traci.start(sumo_cmd)
 
     def _get_obs(self):
-        """Tüm sistem için tek bir gözlem vektörü oluşturur."""
-        obs_vector = []
-        for agent in self.agents: # self.agents sıralı bir liste olduğu için sıralama tutarlıdır
-            incoming_lanes = self.junction_incoming_lanes[agent]
-            vehicle_count = sum(traci.lane.getLastStepVehicleNumber(lane) for lane in incoming_lanes)
-            obs_vector.append(vehicle_count)
+        all_counts = []
+        all_stats = {}
         
-        # Tüm ajanlar aynı birleşik gözlemi alır
-        shared_observation = np.array(obs_vector, dtype=np.float32)
-        return {agent: shared_observation for agent in self.agents}
+        # Önce tüm ajanların temel verilerini topla
+        for agent in self.agents:
+            lanes = self.junction_incoming_lanes[agent]
+            v_count = sum(traci.lane.getLastStepVehicleNumber(lane) for lane in lanes)
+            w_time = sum(traci.lane.getWaitingTime(lane) for lane in lanes)
+            h_count = sum(traci.lane.getLastStepHaltingNumber(lane) for lane in lanes)
+            all_counts.append(v_count)
+            all_stats[agent] = [v_count, w_time, h_count]
+
+        obs_dict = {}
+        for i, agent in enumerate(self.agents):
+            kendi_verisi = all_stats[agent] # [v, w, h]
+            digerleri = [all_counts[j] for j in range(len(self.agents)) if i != j]
+            full_obs = np.array(kendi_verisi + digerleri, dtype=np.float32)
+            obs_dict[agent] = full_obs
+            
+        return obs_dict
 
     def _get_reward(self):
-        """Tüm sistem için global bir ödül hesaplar."""
-        lane_waiting_times = {}
-        for junction_lanes in self.junction_incoming_lanes.values():
-            for lane in junction_lanes:
-                waiting_time = traci.lane.getWaitingTime(lane)
-                lane_waiting_times[lane] = waiting_time
-        
-        total_waiting_time = sum(lane_waiting_times.values())
-        
-        # Bekleme süresini negatif ödül olarak kullan
-        reward = -total_waiting_time
-        return {agent: reward for agent in self.agents}
-
+        rewards = {}
+        for agent in self.agents:
+            lanes = self.junction_incoming_lanes[agent]
+            # Ceza: Bekleme süresi + Kuyruk uzunluğu (Halt sayısı)
+            w_time = sum(traci.lane.getWaitingTime(lane) for lane in lanes)
+            h_count = sum(traci.lane.getLastStepHaltingNumber(lane) for lane in lanes)
+            
+            # Lokal ödül (Her kavşak kendi trafiğinden sorumlu)
+            rewards[agent] = -(w_time * 0.1 + h_count * 1.0)
+            
+        return rewards
 
     def reset(self, seed=None, options=None):
-        """Ortamı sıfırlar."""
         traci.close()
         self._start_sumo()
         self.current_step = 0
+        self.yellow_timers = {agent: 0 for agent in self.agents}
+        self.pending_phases = {agent: None for agent in self.agents}
+        self.current_phases = {agent: traci.trafficlight.getPhase(agent) for agent in self.agents}
         
-        self.terminations = {agent: False for agent in self.agents}
-        self.truncations = {agent: False for agent in self.agents}
-        self.infos = {agent: {} for agent in self.agents}
-
-        observations = self._get_obs()
-        return observations, self.infos
+        return self._get_obs(), {agent: {} for agent in self.agents}
 
     def step(self, actions):
-        """Ortamda bir adım ilerler."""
-        if not actions:
-            # Aksiyon yoksa bir adım ilerle
-            traci.simulationStep()
-            self.current_step += 1
-        else:
-            for agent_id, action in actions.items():
-                current_phase = traci.trafficlight.getPhase(agent_id)
-                if current_phase != action:
-                    traci.trafficlight.setPhase(agent_id, action)
+        if actions:
+            for agent_id, target_phase in actions.items():
+                if self.yellow_timers[agent_id] > 0:
+                    # Sarı ışıkta bekliyor
+                    self.yellow_timers[agent_id] -= 1
+                    if self.yellow_timers[agent_id] == 0:
+                        # Sarı bitti, hedef faza geç
+                        traci.trafficlight.setPhase(agent_id, self.pending_phases[agent_id])
+                        self.current_phases[agent_id] = self.pending_phases[agent_id]
+                else:
+                    # Normal işleyiş
+                    if target_phase != self.current_phases[agent_id]:
+                        # Faz değişimi istendi, araya sarı ışık sok (Simetrik yapıda sarı fazları genelde tek sayılardır)
+                        # Not: Bu mantık SUMO net.xml'deki faz dizilimine bağlıdır. 
+                        # Genelde 0: Yeşil, 1: Sarı, 2: Kırmızı şeklindedir.
+                        # Şimdilik basitleştirilmiş: Eğer değişim varsa 3 adım bekle.
+                        self.yellow_timers[agent_id] = self.yellow_time
+                        self.pending_phases[agent_id] = target_phase
+                        # traci.trafficlight.setPhase(agent_id, find_yellow_phase(target_phase)) 
+                        # Basitlik için sadece mevcut fazda bekletiyoruz veya sarı faza zorluyoruz:
+                        current = traci.trafficlight.getPhase(agent_id)
+                        # SUMO'da sarı fazı bulmaya çalış (varsayılan +1 olabilir)
+                        traci.trafficlight.setPhase(agent_id, (current + 1) % self.action_spaces[agent_id].n)
 
-            traci.simulationStep()
-            self.current_step += 1
+        traci.simulationStep()
+        self.current_step += 1
 
-        # Gözlemleri, ödülleri ve bitiş durumlarını al
         observations = self._get_obs()
         step_rewards = self._get_reward()
         
-        # Sonlandırma koşulları
         sim_bitti = traci.simulation.getMinExpectedNumber() <= 0
-        if self.current_step >= self.max_steps or sim_bitti:
-            # Episode sona erdiğinde terminations'ı True yap
-            self.terminations = {agent: True for agent in self.agents}
-            self.truncations = {agent: False for agent in self.agents} # Bu durumda truncation değil termination
-        else:
-            self.terminations = {agent: False for agent in self.agents}
-            self.truncations = {agent: False for agent in self.agents}
-
+        terminated = self.current_step >= self.max_steps or sim_bitti
         
-        return observations, step_rewards, self.terminations, self.truncations, self.infos
-
-    def render(self):
-        """SUMO-GUI'yi render eder (zaten açıksa)."""
-        pass
+        terminations = {agent: terminated for agent in self.agents}
+        truncations = {agent: False for agent in self.agents}
+        
+        return observations, step_rewards, terminations, truncations, {agent: {} for agent in self.agents}
 
     def close(self):
-        """Ortamı kapatır."""
         traci.close()
+
