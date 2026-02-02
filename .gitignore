@@ -1,0 +1,31 @@
+# Python virtual environment
+robot_env/
+
+# IDE-specific files
+.idea/
+*.iml
+
+# Python cache files
+__pycache__/
+*.pyc
+
+# Ray/RLlib generated directories
+ppo_trafik_isigi_tensorboard/
+run/multi_agent_model/
+ray_results/ # Ray Tune results directory
+
+# Log and metric files
+training_metrics.csv
+*.log
+
+# Temporary/Generated files
+Ekran görüntüsü*.jpg
+temp_run.ps1
+trips.trips.xml
+
+# Zipped models or other archives
+*.zip
+*.tar.gz
+
+# Generated image files
+*.png

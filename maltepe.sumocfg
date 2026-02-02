@@ -1,0 +1,9 @@
+<configuration>
+    <input>
+        <net-file value="maltepe.net.xml"/>
+        <route-files value="maltepe.rou.xml"/>
+    </input>
+    <time>
+        <begin value="0"/>
+    </time>
+</configuration>
