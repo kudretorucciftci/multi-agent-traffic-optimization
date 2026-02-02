@@ -1,7 +1,5 @@
 # 🚦 Multi-Agent Traffic Control with Reinforcement Learning
 
-![AI Traffic Banner](project_banner.png)
-
 ## 📌 Proje Hakkında
 Bu proje, Maltepe bölgesindeki kritik kavşakların (6+ trafik ışığı) koordineli yönetimini sağlamak amacıyla **SUMO (Simulation of Urban MObility)** ve **Ray RLlib / PettingZoo** altyapısını kullanır. Derin Pekiştirmeli Öğrenme (MAPPO/PPO) algoritmaları ile trafik akışı dinamik olarak optimize edilir.
 
