@@ -20,40 +20,79 @@ def env(sumo_cfg_path, **kwargs):
 class raw_env(pettingzoo.ParallelEnv):
     metadata = {"name": "multi_agent_traffic_v1"}
 
-    def __init__(self, sumo_cfg_path, use_gui=False, max_steps=5000):
+    def __init__(self, sumo_cfg_path, use_gui=False, max_steps=5000, label="default"):
         super().__init__()
         self.sumo_cfg = sumo_cfg_path
         self.use_gui = use_gui
         self.max_steps = max_steps
         self.current_step = 0
+        self.label = label
 
         self._start_sumo()
-        self.agents = traci.trafficlight.getIDList()
+        
+        # Ajan Tiplerini Belirle
+        self.tls_agents = list(traci.trafficlight.getIDList())
+        self.vsl_agents = [] # Boş bırakıyoruz (RLlib uyumluluğu için)
+        self.agents = self.tls_agents + self.vsl_agents
         
         # Kavşak bağlantılarını ve şeritleri önbelleğe al
-        self.junction_incoming_lanes = {
-            ts: set(traci.trafficlight.getControlledLanes(ts)) for ts in self.agents
-        }
+        self.junction_incoming_lanes = {}
+        self.vsl_lane_speeds = {} # VSL ajanları için orijinal hızları sakla
         
-        # Her kavşağın komşu kavşaklarını bul (Basit mesafe tabanlı veya manuel tanımlı)
-        # Şimdilik her ajanın gözlemine tüm ajanların bilgisini ekliyoruz (Global farkındalık)
+        net = sumolib.net.readNet(sumo_cfg_path.replace(".sumocfg", ".net.xml"))
         
-        self.action_spaces = {
-            agent: spaces.Discrete(len(traci.trafficlight.getCompleteRedYellowGreenDefinition(agent)[0].phases)) 
-            for agent in self.agents
-        }
+        for agent in self.agents:
+            if agent in self.tls_agents:
+                lanes = set(traci.trafficlight.getControlledLanes(agent))
+            else:
+                # Işıksız kavşaklar için gelen tüm şeritleri bul
+                lanes = set()
+                node = net.getNode(agent)
+                incoming_edges = [e.getID() for e in node.getIncoming()]
+                for edge_id in incoming_edges:
+                    for i in range(traci.edge.getLaneNumber(edge_id)):
+                        lane_id = f"{edge_id}_{i}"
+                        lanes.add(lane_id)
+                        self.vsl_lane_speeds[lane_id] = traci.lane.getMaxSpeed(lane_id)
+            
+            self.junction_incoming_lanes[agent] = lanes
         
-        # Gözlem Uzayı: Her ajan için [Kendi_Araç_Sayısı, Kendi_Bekleme_Süresi, Kendi_Halt_Sayısı, *Diğer_Ajanların_Araç_Sayıları]
-        # Örn: 6 ajan varsa, 3 (kendi) + 5 (diğerleri) = 8 birimlik gözlem
-        num_agents = len(self.agents)
-        self.obs_dim = 3 + (num_agents - 1)
+        # Her kavşağın komşu kavşaklarını bul
+        self.neighbors = {}
+        for agent in self.agents:
+            pos = traci.junction.getPosition(agent)
+            distances = []
+            for other in self.agents:
+                if agent != other:
+                    other_pos = traci.junction.getPosition(other)
+                    dist = np.sqrt((pos[0]-other_pos[0])**2 + (pos[1]-other_pos[1])**2)
+                    distances.append((other, dist))
+            distances.sort(key=lambda x: x[1])
+            self.neighbors[agent] = [d[0] for d in distances[:2]]
+        
+        # Aksiyon Uzayları
+        self.action_spaces = {}
+        for agent in self.agents:
+            if agent in self.tls_agents:
+                n_phases = len(traci.trafficlight.getCompleteRedYellowGreenDefinition(agent)[0].phases)
+                self.action_spaces[agent] = spaces.Discrete(n_phases)
+            else:
+                # VSL için 4 hız seviyesi: 0:%100, 1:%70, 2:%40, 3:%10
+                self.action_spaces[agent] = spaces.Discrete(4)
+        
+        self.obs_dim = 3 + 2 
         self.observation_space_shared = spaces.Box(low=0, high=500, shape=(self.obs_dim,), dtype=np.float32)
 
         # Sarı ışık yönetimi için değişkenler
         self.yellow_time = 3
-        self.yellow_timers = {agent: 0 for agent in self.agents}
-        self.pending_phases = {agent: None for agent in self.agents}
-        self.current_phases = {agent: traci.trafficlight.getPhase(agent) for agent in self.agents}
+        self.yellow_timers = {agent: 0 for agent in self.tls_agents}
+        self.pending_phases = {agent: None for agent in self.tls_agents}
+        self.current_phases = {}
+        for agent in self.agents:
+            if agent in self.tls_agents:
+                self.current_phases[agent] = traci.trafficlight.getPhase(agent)
+            else:
+                self.current_phases[agent] = 0
 
     def observation_space(self, agent: str):
         return self.observation_space_shared
@@ -66,40 +105,44 @@ class raw_env(pettingzoo.ParallelEnv):
         sumo_cmd = [sumo_binary, "-c", self.sumo_cfg, "--no-warnings", "--no-step-log"]
         if self.use_gui:
             sumo_cmd.extend(["--start", "--quit-on-end"])
-        traci.start(sumo_cmd)
+        traci.start(sumo_cmd, label=self.label)
 
     def _get_obs(self):
-        all_counts = []
         all_stats = {}
-        
-        # Önce tüm ajanların temel verilerini topla
         for agent in self.agents:
             lanes = self.junction_incoming_lanes[agent]
             v_count = sum(traci.lane.getLastStepVehicleNumber(lane) for lane in lanes)
             w_time = sum(traci.lane.getWaitingTime(lane) for lane in lanes)
             h_count = sum(traci.lane.getLastStepHaltingNumber(lane) for lane in lanes)
-            all_counts.append(v_count)
-            all_stats[agent] = [v_count, w_time, h_count]
+            all_stats[agent] = {"v": v_count, "w": w_time, "h": h_count}
 
         obs_dict = {}
-        for i, agent in enumerate(self.agents):
-            kendi_verisi = all_stats[agent] # [v, w, h]
-            digerleri = [all_counts[j] for j in range(len(self.agents)) if i != j]
-            full_obs = np.array(kendi_verisi + digerleri, dtype=np.float32)
+        for agent in self.agents:
+            kendi = all_stats[agent]
+            # Komşuların araç sayılarını ekle
+            comp_data = []
+            for n in self.neighbors[agent]:
+                comp_data.append(all_stats[n]["v"])
+            
+            full_obs = np.array([kendi["v"], kendi["w"], kendi["h"]] + comp_data, dtype=np.float32)
             obs_dict[agent] = full_obs
             
         return obs_dict
 
     def _get_reward(self):
-        rewards = {}
+        local_rewards = {}
         for agent in self.agents:
             lanes = self.junction_incoming_lanes[agent]
-            # Ceza: Bekleme süresi + Kuyruk uzunluğu (Halt sayısı)
             w_time = sum(traci.lane.getWaitingTime(lane) for lane in lanes)
             h_count = sum(traci.lane.getLastStepHaltingNumber(lane) for lane in lanes)
-            
-            # Lokal ödül (Her kavşak kendi trafiğinden sorumlu)
-            rewards[agent] = -(w_time * 0.1 + h_count * 1.0)
+            # Normalize edilmiş lokal ceza
+            local_rewards[agent] = -(w_time * 0.01 + h_count * 0.1)
+
+        rewards = {}
+        for agent in self.agents:
+            # İşbirlikçi ödül: Kendi_Ödül + 0.5 * (Komşuların_Ödülleri)
+            neighbor_contrib = sum(local_rewards[n] for n in self.neighbors[agent])
+            rewards[agent] = local_rewards[agent] + 0.5 * neighbor_contrib
             
         return rewards
 
@@ -107,36 +150,45 @@ class raw_env(pettingzoo.ParallelEnv):
         traci.close()
         self._start_sumo()
         self.current_step = 0
-        self.yellow_timers = {agent: 0 for agent in self.agents}
-        self.pending_phases = {agent: None for agent in self.agents}
-        self.current_phases = {agent: traci.trafficlight.getPhase(agent) for agent in self.agents}
+        
+        # Sadece TLS ajanları için faz/zamanlayıcı yönetimi
+        self.yellow_timers = {agent: 0 for agent in self.tls_agents}
+        self.pending_phases = {agent: None for agent in self.tls_agents}
+        self.current_phases = {}
+        
+        for agent in self.agents:
+            if agent in self.tls_agents:
+                self.current_phases[agent] = traci.trafficlight.getPhase(agent)
+            else:
+                self.current_phases[agent] = 0 # VSL başlangıç durumu (%100 hız)
         
         return self._get_obs(), {agent: {} for agent in self.agents}
 
     def step(self, actions):
         if actions:
-            for agent_id, target_phase in actions.items():
-                if self.yellow_timers[agent_id] > 0:
-                    # Sarı ışıkta bekliyor
-                    self.yellow_timers[agent_id] -= 1
-                    if self.yellow_timers[agent_id] == 0:
-                        # Sarı bitti, hedef faza geç
-                        traci.trafficlight.setPhase(agent_id, self.pending_phases[agent_id])
-                        self.current_phases[agent_id] = self.pending_phases[agent_id]
+            for agent_id, action in actions.items():
+                if agent_id in self.tls_agents:
+                    # TRAFİK IŞIĞI MANTIĞI
+                    target_phase = action
+                    if self.yellow_timers[agent_id] > 0:
+                        self.yellow_timers[agent_id] -= 1
+                        if self.yellow_timers[agent_id] == 0:
+                            traci.trafficlight.setPhase(agent_id, self.pending_phases[agent_id])
+                            self.current_phases[agent_id] = self.pending_phases[agent_id]
+                    else:
+                        if target_phase != self.current_phases[agent_id]:
+                            self.yellow_timers[agent_id] = self.yellow_time
+                            self.pending_phases[agent_id] = target_phase
+                            current = traci.trafficlight.getPhase(agent_id)
+                            traci.trafficlight.setPhase(agent_id, (current + 1) % self.action_spaces[agent_id].n)
                 else:
-                    # Normal işleyiş
-                    if target_phase != self.current_phases[agent_id]:
-                        # Faz değişimi istendi, araya sarı ışık sok (Simetrik yapıda sarı fazları genelde tek sayılardır)
-                        # Not: Bu mantık SUMO net.xml'deki faz dizilimine bağlıdır. 
-                        # Genelde 0: Yeşil, 1: Sarı, 2: Kırmızı şeklindedir.
-                        # Şimdilik basitleştirilmiş: Eğer değişim varsa 3 adım bekle.
-                        self.yellow_timers[agent_id] = self.yellow_time
-                        self.pending_phases[agent_id] = target_phase
-                        # traci.trafficlight.setPhase(agent_id, find_yellow_phase(target_phase)) 
-                        # Basitlik için sadece mevcut fazda bekletiyoruz veya sarı faza zorluyoruz:
-                        current = traci.trafficlight.getPhase(agent_id)
-                        # SUMO'da sarı fazı bulmaya çalış (varsayılan +1 olabilir)
-                        traci.trafficlight.setPhase(agent_id, (current + 1) % self.action_spaces[agent_id].n)
+                    # VSL (HIZ KONTROL) MANTIĞI
+                    # action -> 0: %100, 1: %70, 2: %40, 3: %10 hız
+                    speed_factors = [1.0, 0.7, 0.4, 0.1]
+                    factor = speed_factors[action]
+                    for lane in self.junction_incoming_lanes[agent_id]:
+                        orig_speed = self.vsl_lane_speeds[lane]
+                        traci.lane.setMaxSpeed(lane, orig_speed * factor)
 
         traci.simulationStep()
         self.current_step += 1
