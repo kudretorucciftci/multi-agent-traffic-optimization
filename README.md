@@ -1,6 +1,6 @@
 # 🚦 Maltepe Akıllı Trafik Yönetim Sistemi (GNN-Hybrid RL)
 
-![Project Banner](assets/project_banner.png)
+![Simulation Output](assets/simulation.gif)
 
 Bu proje, İstanbul Maltepe bölgesindeki trafik akışını **Çoklu Ajanlı Takviyeli Öğrenme (MARL)** ve **Graf Sinir Ağları (GNN)** kullanarak optimize eden hibrit bir kontrol sistemidir. Sistem, sadece trafik ışıklarını değil, aynı zamanda bölgedeki değişken hız tabelalarını (VSL) da akıllı ajanlar olarak yönetir.
 
