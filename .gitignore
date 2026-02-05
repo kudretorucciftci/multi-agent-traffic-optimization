@@ -1,31 +1,60 @@
-# Python virtual environment
-robot_env/
-
-# IDE-specific files
-.idea/
-*.iml
-
-# Python cache files
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# Ray/RLlib generated directories
-ppo_trafik_isigi_tensorboard/
-run/multi_agent_model/
-ray_results/ # Ray Tune results directory
+# Virtual Environment
+robot_env/
+venv/
+.env
 
-# Log and metric files
-training_metrics.csv
+# SUMO / Simulation
 *.log
+tripinfo.xml
+summary.xml
+tripinfo_*.xml
+*.bak
+dump.xml
+state.xml
 
-# Temporary/Generated files
-Ekran görüntüsü*.jpg
-temp_run.ps1
-trips.trips.xml
+# Training / Ray
+ray_results/
+ppo_trafik_isigi_tensorboard/
+*.checkpoint
+*.tfevents.*
 
-# Zipped models or other archives
+# Redundant Data
+gnn_hybrid_metrics (1).csv
+gnn_training_metrics.csv
+hybrid_final_metrics.csv
+hybrid_v2_metrics.csv
+
+# Backups and temporary
 *.zip
-*.tar.gz
+*.mp4
+*.gif
+.idea/
+.vscode/
 
-# Generated image files
-*.png
+# Project Specific
+assets/Ekran görüntüsü*.jpg
+run/*.png
+!run/anlasilir_performans_ozeti.png

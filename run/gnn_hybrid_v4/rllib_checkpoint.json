@@ -1,0 +1,1 @@
+{"type": "Algorithm", "checkpoint_version": "1.1", "format": "cloudpickle", "state_file": "C:\\Users\\Lenovo\\Desktop\\rl-multi-agent-traffic-control\\run\\gnn_hybrid_v4\\algorithm_state.pkl", "policy_ids": ["shared_policy"], "ray_version": "2.53.0", "ray_commit": "0de211850589aea71f842873bc32574c702ab492"}

@@ -85,3 +85,19 @@ Sistem artık iki farklı tip ajanı aynı anda yönetmektedir:
 ### B. Gerçekçi Trafik Yönetimi
 - **Dinamik Hız Kademeleri:** Türkiye şehir içi standartlarına uygun olarak hız limitleri yoğunluğa göre kademeli (15, 30, 40, 50 km/s) olarak anlık güncellenmektedir.
 - **Görselleştirme:** SUMO-GUI üzerinde gerçekçi trafik levhaları ve AI ikonları kullanılarak sistem bir "Dijital Trafik İkizi" (Digital Twin) haline getirilmiştir.
+- **Görselleştirme:** SUMO-GUI üzerinde gerçekçi trafik levhaları ve AI ikonları kullanılarak sistem bir "Dijital Trafik İkizi" (Digital Twin) haline getirilmiştir.
+
+## 10. Hibrit V3 Mimarisi ve İleri Düzey Eğitim (3 Şubat 2026)
+149 ajanın tamamını aynı anda eğitme aşamasında yaşanan `nan` değerleri ve performans darboğazları üzerine "Hibrit V3" mimarisine geçilmiştir.
+
+### A. Mimari Kararlar
+- **RL Odaklılık:** Eğitim süreci, Maltepe'nin ana arterlerini kontrol eden 6 adet trafik ışığına (TLS) odaklanmıştır.
+- **Kural Bazlı Destek (VSL):** Geri kalan 143 kavşaktaki hız tabelaları, RL ajanlarına "temiz" bir trafik akışı sağlamak için yüksek performanslı kural bazlı (Rule-based) sisteme dönüştürülmüştür.
+- **Sayısal Kararlılık:** Ödül fonksiyonuna `np.nan_to_num` ve `float` tip korumaları eklenerek `nan` hataları tamamen giderilmiştir.
+
+### B. Eğitim Durumu (35/200 İterasyon)
+- **Başlangıç:** 3 Şubat 16:30.
+- **Mevcut İlerleme:** 35 iterasyon tamamlandı.
+- **Gözlem:** Model, 143 akıllı tabelanın trafiği önden düzenlediği bu yeni ortamda kararlı bir şekilde öğrenmeye devam etmektedir.
+- **Son Durum Ödülü:** -7,145 (35. iterasyon).
+- **Not:** Eğitim, kaldığı yerden (35. iterasyon) devam edebilecek şekilde periyodik olarak kaydedilmektedir.

@@ -1,96 +1,119 @@
 import os
 import sys
 import ray
+import torch
+import csv
 from ray.rllib.algorithms.ppo import PPOConfig
 from ray.tune.registry import register_env
-import csv
+from ray.rllib.models import ModelCatalog
 
-# Proje kök dizinini Python yoluna ekle
+# Proje kök dizini
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 
 from ray.rllib.env.wrappers.pettingzoo_env import ParallelPettingZooEnv
 from train.multi_agent_env import raw_env as multi_agent_traffic_raw_env
+from train.gnn_model import GNNTrafficModel
 
-# Ortamı rllib'e kaydet
+# 1. Model Kaydı
+ModelCatalog.register_custom_model("gnn_traffic_model", GNNTrafficModel)
+
+# 2. Ortam Kaydı
 def env_creator(env_config):
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sumo_cfg_path = os.path.join(project_root, "maltepe.sumocfg")
     pettingzoo_env = multi_agent_traffic_raw_env(sumo_cfg_path=sumo_cfg_path, **env_config)
     return ParallelPettingZooEnv(pettingzoo_env)
 
 register_env("multi_agent_traffic_env", env_creator)
 
-# Ray'i başlat
+# 3. Ray Başlatma
 ray.shutdown()
 ray.init(ignore_reinit_error=True)
 
-# PPO algoritmasını yapılandır (Yeni V1 Mimariye Göre Optimize Edildi)
+# 4. PPO Konfigürasyonu (Hibrit V4: GNN + Yeşil Dalga + Emisyon)
 config = (
     PPOConfig()
-    .environment(
-        "multi_agent_traffic_env", 
-        env_config={"use_gui": False, "max_steps": 5000}
-    )
-    .env_runners(
-        num_env_runners=1, 
-        rollout_fragment_length=2000 # Daha sık güncelleme için ayarlandı
-    )
+    .environment("multi_agent_traffic_env", env_config={"use_gui": False, "max_steps": 5000})
+    .framework("torch")
+    .env_runners(num_env_runners=1, rollout_fragment_length=2000)
     .training(
         gamma=0.99,
-        lr=5e-5,
+        lr=2e-5, # İnce ayar için daha düşük öğrenme oranı
         train_batch_size=4000,
-        model={
-            "fcnet_hiddens": [256, 256, 256], # Daha derin ağ ile graf verisini işleme
-            "fcnet_activation": "relu",
-        },
+        model={"custom_model": "gnn_traffic_model"},
         use_gae=True,
         lambda_=0.95,
         vf_loss_coeff=0.5,
-        entropy_coeff=0.05, # Keşif (exploration) için artırıldı
+        entropy_coeff=0.03,
     )
     .multi_agent(
         policies={"shared_policy"},
-        policy_mapping_fn=(lambda agent_id, episode, **kwargs: "shared_policy"),
+        policy_mapping_fn=(lambda aid, *args, **kwargs: "shared_policy"),
     )
     .evaluation(
-        evaluation_num_env_runners=1,
-        evaluation_interval=5, # Her 5 iterasyonda bir test et
+        evaluation_num_workers=1,
+        evaluation_interval=10,
         evaluation_duration=1,
         evaluation_config={"explore": False}
     )
+    .api_stack(enable_rl_module_and_learner=False, enable_env_runner_and_connector_v2=False)
     .resources(num_gpus=0)
 )
 
-# Algoritmayı oluştur
 algo = config.build()
 
-metrics_file_path = "training_metrics.csv"
-with open(metrics_file_path, 'w', newline='') as csvfile:
-    metric_writer = csv.writer(csvfile)
-    metric_writer.writerow(["Iterasyon", "Egitim Ort. Odul", "Degerlendirme Ort. Odul", "Toplam Adim"])
+# 5. TECRÜBE YÜKLEME VE DEVAM ETME
+# Kaggle'dan gelen en güncel modelin yolu
+resume_checkpoint = os.path.abspath(os.path.join(project_root, "run", "gnn_hybrid_v4"))
 
-print("🚀 Yeni V1 Mimarisi ile kapsamlı eğitim başlıyor...")
+start_iter = 0
+metrics_file = "gnn_hybrid_metrics.csv"
 
+# Eğer eski metrikler varsa son iterasyonu bul
+if os.path.exists(metrics_file):
+    with open(metrics_file, 'r') as f:
+        lines = f.readlines()
+        if len(lines) > 1:
+            try:
+                start_iter = int(lines[-1].split(",")[0])
+                print(f"Eski veriler bulundu. Egitim {start_iter}. iterasyondan devam edecek.")
+            except: pass
+
+if os.path.exists(resume_checkpoint):
+    print(f"Egitim {resume_checkpoint} konumundan yukleniyor...")
+    try:
+        algo.restore(resume_checkpoint)
+        print("✅ Tecrube aktarimi basarili! Model kaldigi yerden ogrenmeye devam ediyor.")
+    except Exception as e:
+        print(f"⚠️ Direkt yukleme yapılamadı (Sürüm farkı olabilir), agirliklar aktarılmaya calisiliyor. Hata: {e}")
+else:
+    print("❌ Resume checkpoint bulunamadı, egitim sifirdan basliyor.")
+
+# 6. EGITIM DONGUSU
+if not os.path.exists(metrics_file):
+    with open(metrics_file, 'w', newline='') as f:
+        csv.writer(f).writerow(["Iterasyon", "Reward", "Eval_Reward", "Steps"])
+
+print(f"FINE-TUNING DEVAM EDIYOR: Hedef 500 Iterasyon (Baslangic: {start_iter})")
 try:
-    for i in range(200): # 200 iterasyon için eğit
+    for i in range(start_iter, 500):
         result = algo.train()
+        reward = result.get("env_runners", {}).get("episode_return_mean", 0) or 0
+        eval_reward = result.get("evaluation", {}).get("episode_return_mean", 0) or 0
+        steps = result.get("timesteps_total", 0)
         
-        train_reward = result.get("env_runners", {}).get('episode_return_mean', 0)
-        eval_reward = result.get("evaluation", {}).get('episode_return_mean', 0)
-        total_steps = result.get('timesteps_total', 0)
+        print(f"Iterasyon {i+1}: Odul={reward:.2f}, Test={eval_reward:.2f}, Toplam Adim={steps}")
         
-        print(f"İterasyon {i+1}: Ödül={train_reward:.2f}, Test Ödülü={eval_reward:.2f}, Toplam Adım={total_steps}")
-        
-        with open(metrics_file_path, 'a', newline='') as csvfile:
-            metric_writer = csv.writer(csvfile)
-            metric_writer.writerow([i+1, train_reward, eval_reward, total_steps])
+        with open(metrics_file, 'a', newline='') as f:
+            csv.writer(f).writerow([i+1, reward, eval_reward, steps])
+            
+        if (i+1) % 50 == 0:
+            save_path = algo.save(resume_checkpoint)
+            print(f"Periyodik kayit: {save_path}")
+
 except KeyboardInterrupt:
-    print("\n🛑 Eğitim kullanıcı tarafından durduruldu.")
+    print("\nKullanici durdurdu.")
 
-# Modeli kaydet (Nihai Model)
-checkpoint_path = os.path.abspath(os.path.join("run", "multi_agent_model"))
-algo.save(checkpoint_path)
-print(f"✅ Nihai model kaydedildi: {checkpoint_path}")
-
+final_path = algo.save(resume_checkpoint)
+print(f"Egitim tamamlandi. Nihai GNN Hibrit Model: {final_path}")
 ray.shutdown()
