@@ -25,6 +25,14 @@ Modelin eğitimi ve parametre optimizasyonu için yüksek işlem gücü gerektir
 ### 2. Simulation & Production Environment (SUMO)
 Eğitilen modeller, Maltepe bölgesinin birebir dijital haritasının (Digital Twin) bulunduğu **SUMO (Simulation of Urban MObility)** ortamında test edilmiştir. Bu ortamda hibrit ajanların (Learning & Rule-based) dinamik trafikteki tepkileri saniye saniye izlenmiş ve verify edilmiştir.
 
+## 🔗 Kaynaklar ve Araçlar
+
+Bu projenin oluşturulmasında kullanılan temel veri kaynakları ve yazılımlar:
+
+- **Harita Verisi (Map Data):** Maltepe bölgesi yol ağı verileri [OpenStreetMap (OSM)](https://www.openstreetmap.org/) üzerinden dışa aktarılmıştır.
+- **Trafik Simülatörü:** Açık kaynaklı mikroskobik trafik simülasyonu yazılımı [Eclipse SUMO](https://eclipsedev.stat.ec/sumo/) kullanılmıştır.
+- **Eğitim Altyapısı (Training):** Modellerin eğitimi için [Kaggle](https://www.kaggle.com/) bulut GPU altyapısı tercih edilmiştir.
+
 ## ⚙️ Hybrid MAS Architecture
 
 Sistem, şehir ölçeğinde bir koordinasyon sağlamak için iki farklı **Agent** tipini birleştirir:
