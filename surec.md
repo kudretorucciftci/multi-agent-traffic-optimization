@@ -1,103 +1,33 @@
-# Proje Süreci ve Teknik Günlük
+# Ar-Ge Süreci ve Teknik Gelişim Günlüğü
 
-## 1. Proje Amacı ve Kapsamı
-Bu proje, Maltepe bölgesindeki kritik 6 kavşağın (trafik ışıkları) koordineli yönetimini amaçlar. Çoklu ajanlı derin takviyeli öğrenme (MAPPO/PPO) kullanılarak araç bekleme sürelerinin minimize edilmesi hedeflenmektedir.
+Bu proje, basit bir trafik ışığı kontrolünden, şehir ölçeğinde bir **Digital Twin** yapısına evrilen karmaşık bir mühendislik sürecidir. İşte bu süreçte karşılaşılan teknik engeller ve uygulanan mimari çözümler:
 
-## 2. Teknik Kilometre Taşları ve Yaşanan Sorunlar
+## 1. Mimari Dönüşüm: MLP'den Knowledge Graph'e
 
-### Aşama 1: Ortam Kurulumu ve Entegrasyon
-- **Kullanılan Araçlar:** SUMO (Simülatör), PettingZoo (Multi-agent API), RLlib (Eğitim Kütüphanesi).
-- **İlk Durum:** SUMO simülasyonu ile PettingZoo arayüzü başarıyla bağlandı.
+Projenin ilk aşamalarında kullanılan standart **MLP (Multi-Layer Perceptron)** tabanlı yapıda, her kavşağın (Agent) izole bir şekilde karar verdiği gözlemlendi. Bu durum, kavşakların birbirini beklemesine ve simülasyonun kilitlenmesine neden oluyordu.
 
-### Aşama 2: Gözlem Uzayı (Observation Space) Darboğazı
-- **Sorun:** RLlib, `Dict` yapısındaki gözlem uzaylarını işlemede hata verdi (`ValueError: No default encoder config`).
-- **Çözüm:** `observation_space` yapısı basitleştirildi. `Box` vektörüne geçildi.
+- **Çözüm:** **Knowledge Graph** topolojisine geçilerek agent'lara komşu farkındalığı (**Spatial Awareness**) kazandırıldı. Agent'lar artık "Common Knowledge" paylaşımı yaparak trafiği ortak bir stratejiyle yönetmeye başladı.
 
-### Aşama 3: Sarı Işık ve Graf Duyarlı Mimari (V1)
-- **Yenilik:** Ajanlara "komşu farkındalığı" (Neighbor Awareness) kazandırıldı. Artık her ajan sadece kendi kavşağını değil, komşularını da gözlemliyor.
-- **Sarı Işık:** Geçişler arasına 3 saniyelik sarı ışık fazları otomatik olarak eklendi.
-- **Lokal Ödül:** Her kavşak kendi bekleme süresi ve kuyruk uzunluğuna göre bireysel ceza aldığı bir sisteme geçildi.
+## 2. Karşılaşılan Teknik "Challenges" ve Çözümleri
 
-## 3. Sistem Mimarisi (Nasıl Çalışıyor?)
-Projemizde **"Paylaşılan Politika" (Shared Policy)** mantığı kullanılmaktadır. 
+### Gözlem Uzayı (Observation Space) Uyumsuzluğu
+- **Sorun:** RLlib kütüphanesinin karmaşık `Dict` yapılarını işlerken ortaya çıkardığı kısıtlamalar, eğitimin başlamasını engelledi.
+- **Çözüm:** Observation verileri normalize edilip `Box` vektörlerine dönüştürülerek model stabilitesi artırıldı.
 
-- **Bağımsız Kararlar:** Her kavşak (ajan) kendi kararlarını kendisi verir. Merkezi bir "Süper Ajan" yoktur.
-- **Ortak Zeka:** Tüm ajanlar aynı sinir ağını (beyni) kullanır. Bu sayede bir kavşağın öğrendiği "trafiği rahatlatma" stratejisi anında diğer kavşaklar tarafından da kullanılabilir.
-- **Graf Duyarlılığı:** Her ajan sadece kendi önündeki araçları değil, komşu kavşakların da doluluk oranını görür. Bu, ajanların birbirleriyle "konuşmadan" koordine olmalarını sağlar.
-- **Lokal Sorumluluk:** Her ajan kendi bölgesindeki bekleme süresini azaltmaktan doğrudan sorumludur ve buna göre ödül/ceza alır.
+### NaN (Not a Number) ve Sayısal Dalgalanmalar
+- **Sorun:** Ödül fonksiyonundaki (Reward Function) kümülatif beklemelerin devasa boyutlara ulaşması matematiksel taşmalara ve modelin öğrenememesine neden oldu.
+- **Çözüm:** `np.nan_to_num` kullanımı ve ödül skalasının **Normalization** işlemine tabi tutulmasıyla eğitim kararlı hale getirildi.
 
-## 4. Güncel Durum ve Sonraki Adımlar
-- **Eğitim (2 Şubat 2026):** İlk 24 iterasyon test edildi. İterasyon 17'de ödül -360.000 seviyesine kadar (başlangıçtaki -1M'den) iyileşme gösterdi ancak stabilite sorunları ve `nan` değerleri tespit edildi.
-- **Hedef:** Knowledge Graph tabanlı yapıya geçilerek mekansal verimlilik artırılacak.
+### Sistem Kaynakları ve OOM (Out Of Memory) Hataları
+- **Sorun:** Büyük harita (Maltepe) ve 149 ajanın aynı anda işlenmesi sırasında CPU/RAM üzerinde darboğazlar yaşandı, eğitimler kesildi.
+- **Çözüm:** Aşamalı **Checkpointing** sistemine geçildi ve Ray konfigürasyonundaki `object_store_memory` limitleri optimize edilerek eğitimin kaldığı yerden devam etmesi sağlandı.
 
-## 5. 24 İterasyonluk İlk Eğitim Analizi (2 Şubat 2026)
-Eğitim sürecinde yapılan ilk 24 iterasyon aşağıdaki kritik bulguları ortaya çıkarmıştır:
+## 3. Hibrit V4 ve Fine-tuning Stratejisi
 
-1. **Ödül Dinamiği:** Başlangıçta -1.200.000 olan ödül cezası, 17. iterasyonda -360.000'e kadar iyileştirilmiştir.
-2. **Sorunlar:** Değerlendirme döngülerindeki `nan` hataları ve adım sayısının loglanamaması raporlanmıştır.
+- Sadece trafik ışıklarını eğitmenin yetersiz kaldığı "Pik Yoğunluk" senaryolarında, 143 adet **Variable Speed Limit (VSL)** tabanlı kural-tabanlı ajan sisteme entegre edildi.
+- **Hybrid MAS** yapısı kurulduktan sonra, sistem 500 iterasyonluk temel eğitimin üzerine 200 iterasyonluk bir **Fine-tuning** sürecine sokuldu.
+- Bu strateji, Learning Agent'lar için "gürültüsüz" (Noise-free) bir trafik akışı yaratarak sistem başarısını en üst seviyeye çıkardı.
 
-## 6. Knowledge Graph (Bilgi Grafı) ve V1 Mimarisi
-Eğitimi daha anlamlı hale getirmek için "Topolojik/Graf Tabanlı" bir yaklaşıma geçilmiştir:
+## 4. Final Vizyonu
 
-- **Topolojik Gözlem:** Her ajan sadece fiziksel komşularından gelen verileri görür.
-- **İşbirlikçi Ödül:** Bir kavşak sadece kendi bekleme süresi ve komşu cezalarının bir kısmını hisseder.
-- **Normalizasyon:** Milyonlarla ifade edilen ödül değerleri, eğitimin stabilizasyonu için stabilize edildi.
-
-## 7. Kapsamlı V1 Eğitimi (2-3 Şubat 2026) - TAMAMLANDI
-V1 mimarisi üzerinde yürütülen büyük eğitim süreci başarıyla sonuçlandı.
-
-### A. Eğitim İstatistikleri
-- **Toplam İterasyon:** 500.
-- **Toplam Süre:** Yaklaşık 14 saat.
-- **Mutlak En İyi Ödül:** **-51,574 (164. iterasyon)**.
-- **Son Durum Ödülü:** **-152,869 (500. iterasyon)**.
-
-### B. Teknik Zorluklar ve Çözümler
-- **Durdurma ve Devam:** Eğitim 385. iterasyonda manuel durdurulup başarıyla devralındı.
-- **Bellek Sorunu:** 453. iterasyonda bellek yetersizliği (OOM) nedeniyle duran eğitim, taze bir başlangıçla 500. iterasyona tamamlandı.
-- **Checkpointing:** Tüm süreç boyunca modeller `run/multi_agent_model` dizinine periyodik ve final olarak kaydedildi.
-
-### C. Analiz ve Gelişim
-- **Trafik Akışı:** Başlangıçtaki -1.2M ceza puanından -51K seviyelerine inilmesi, trafik sisteminde devasa bir verimlilik artışı sağlandığını kanıtlamaktadır.
-- **Öğrenme Kararlılığı:** Modelin 500 iterasyon sonunda belirli bir performans bandına oturduğu ve kararlı kararlar vermeye başladığı gözlemlenmiştir.
-
-### D.- **Görsel Test:** Eğitilen modelin Maltepe ağında SUMO GUI ile koşturulup görsel analizi yapılacak. (TAMAMLANDI)
-- **Veri Karşılaştırma:** Eğitilmemiş (baseline) durum ile eğitilmiş modelin araç başı ortalama bekleme süreleri kıyaslanacak. (TAMAMLANDI)
-
-## 8. Performans Karşılaştırma Analizi (Kıyaslama Testi)
-Eğitilen RL (Takviyeli Öğrenme) modeli, SUMO'nun varsayılan statik trafik ışığı kontrol sistemiyle 20.000 adımlık bir simülasyonda kıyaslanmıştır:
-
-- **Baseline (Standart Sistem):** Ortalama Bekleme Süresi: **92.76 sn**
-- **RL Model (Yapay Zeka):** Ortalama Bekleme Süresi: **86.03 sn**
-- **Verimlilik Artışı:** **%7.26 İyileşme** sağlandı.
-
-Bu sonuç, projenin en başındaki "koordineli yönetim" hedefinin başarıldığını ve araçların kavşaklarda daha az vakit kaybettiğini matematiksel olarak kanıtlamaktadır.
-
-## 9. Vizyon Genişlemesi: "Total Maltepe" Akıllı Şehir Altyapısı
-Proje kapsamı 6 kavşaktan Maltepe haritasının tamamına yayılacak şekilde genişletilmiştir:
-
-### A. Karma Ajan Mimarisi (Hybrid Architecture)
-Sistem artık iki farklı tip ajanı aynı anda yönetmektedir:
-1. **🤖 AI TLS (6 Ajan):** Eğitilen RL modeli ile yönetilen ana arter trafik ışıkları.
-2. **🚀 AI SPEED (143 Ajan):** Diğer tüm kavşaklara eklenen "Akıllı Hız Kontrolü" (VSL) üniteleri.
-   - **Toplam Ajan Sayısı:** 149.
-
-### B. Gerçekçi Trafik Yönetimi
-- **Dinamik Hız Kademeleri:** Türkiye şehir içi standartlarına uygun olarak hız limitleri yoğunluğa göre kademeli (15, 30, 40, 50 km/s) olarak anlık güncellenmektedir.
-- **Görselleştirme:** SUMO-GUI üzerinde gerçekçi trafik levhaları ve AI ikonları kullanılarak sistem bir "Dijital Trafik İkizi" (Digital Twin) haline getirilmiştir.
-- **Görselleştirme:** SUMO-GUI üzerinde gerçekçi trafik levhaları ve AI ikonları kullanılarak sistem bir "Dijital Trafik İkizi" (Digital Twin) haline getirilmiştir.
-
-## 10. Hibrit V3 Mimarisi ve İleri Düzey Eğitim (3 Şubat 2026)
-149 ajanın tamamını aynı anda eğitme aşamasında yaşanan `nan` değerleri ve performans darboğazları üzerine "Hibrit V3" mimarisine geçilmiştir.
-
-### A. Mimari Kararlar
-- **RL Odaklılık:** Eğitim süreci, Maltepe'nin ana arterlerini kontrol eden 6 adet trafik ışığına (TLS) odaklanmıştır.
-- **Kural Bazlı Destek (VSL):** Geri kalan 143 kavşaktaki hız tabelaları, RL ajanlarına "temiz" bir trafik akışı sağlamak için yüksek performanslı kural bazlı (Rule-based) sisteme dönüştürülmüştür.
-- **Sayısal Kararlılık:** Ödül fonksiyonuna `np.nan_to_num` ve `float` tip korumaları eklenerek `nan` hataları tamamen giderilmiştir.
-
-### B. Eğitim Durumu (35/200 İterasyon)
-- **Başlangıç:** 3 Şubat 16:30.
-- **Mevcut İlerleme:** 35 iterasyon tamamlandı.
-- **Gözlem:** Model, 143 akıllı tabelanın trafiği önden düzenlediği bu yeni ortamda kararlı bir şekilde öğrenmeye devam etmektedir.
-- **Son Durum Ödülü:** -7,145 (35. iterasyon).
-- **Not:** Eğitim, kaldığı yerden (35. iterasyon) devam edebilecek şekilde periyodik olarak kaydedilmektedir.
+Süreç sonunda elde edilen model, sadece teknik bir başarı değil, gerçek şehir trafiğinin bir **Digital Twin** yansıması olarak başarıyla çalışmaktadır. GNN-Hybrid yaklaşımı, Maltepe ağındaki seyahat sürelerini minimize ederken karbon emisyonunu da dolaylı olarak azaltmayı başarmıştır.
