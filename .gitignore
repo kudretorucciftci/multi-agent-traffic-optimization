@@ -50,7 +50,6 @@ hybrid_v2_metrics.csv
 # Backups and temporary
 *.zip
 *.mp4
-*.gif
 .idea/
 .vscode/
 
