@@ -26,34 +26,27 @@ robot_env/
 venv/
 .env
 
-# SUMO / Simulation
-*.log
-tripinfo.xml
-summary.xml
-tripinfo_*.xml
+# Data & Large Files
+*.csv
+*.xml
+!maltepe.net.xml
+!istanbul_vtypes.add.xml
+*.ipynb
+*.zip
+*.7z
+*.mp4
 *.bak
-dump.xml
-state.xml
 
-# Training / Ray
+# Training & Logs
 ray_results/
 ppo_trafik_isigi_tensorboard/
+*.log
 *.checkpoint
 *.tfevents.*
 
-# Redundant Data
-gnn_hybrid_metrics (1).csv
-gnn_training_metrics.csv
-hybrid_final_metrics.csv
-hybrid_v2_metrics.csv
-
-# Backups and temporary
-*.zip
-*.mp4
+# Assets & Reports
+!assets/*.png
+!assets/*.gif
+!mega_v4_report.png
 .idea/
 .vscode/
-
-# Project Specific
-assets/Ekran görüntüsü*.jpg
-run/*.png
-!run/anlasilir_performans_ozeti.png
