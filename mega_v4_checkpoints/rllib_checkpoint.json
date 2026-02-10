@@ -1,0 +1,1 @@
+{"type": "Algorithm", "checkpoint_version": "1.1", "format": "cloudpickle", "state_file": "/kaggle/working/mega_v4_checkpoints/algorithm_state.pkl", "policy_ids": ["shared_policy"], "ray_version": "2.38.0", "ray_commit": "385ee466260ef3cd218d5e372aef5d39338b7b94"}
