@@ -1,6 +1,8 @@
 # 🚦 Maltepe Digital Twin: Hybrid Multi-Agent Traffic Control
 
-![Simulation Output](assets/WhatsApp_Video_Simulation.gif)
+<p align="center">
+  <img src="assets/WhatsApp_Video_Simulation.gif" alt="Simulation Output" width="100%">
+</p>
 
 This project is an advanced **Deep Reinforcement Learning (Mega v4)** solution that optimizes traffic flow in the Maltepe district of Istanbul using **Hybrid Multi-Agent Systems (MAS)** and **Knowledge Graph** topology.
 
