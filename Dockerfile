@@ -1,7 +1,8 @@
-# 1. Python ve Ubuntu tabanlı ana imaj
+# Python ve Ubuntu tabanlı ana imaj
 FROM python:3.12-slim
 
-# 2. Sistem bağımlılıklarını ve SUMO'yu kur
+# Root yetkisiyle sistem bağımlılıklarını ve SUMO'yu kur
+USER root
 RUN apt-get update && apt-get install -y \
     sumo \
     sumo-tools \
@@ -10,21 +11,24 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# 3. SUMO ortam değişkenlerini ayarla
+# SUMO ortam değişkenlerini ayarla
 ENV SUMO_HOME=/usr/share/sumo
 
-# 4. Çalışma dizinini oluştur
+# Hugging Face için kullanıcı oluştur (user id 1000)
+RUN useradd -m -u 1000 user
 WORKDIR /app
 
-# 5. Gerekli dosyaları kopyala
-COPY requirements.txt .
+# Dosyaları kopyala ve yetkileri düzenle
+COPY --chown=user requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 6. Tüm proje dosyalarını kopyala
-COPY . .
+COPY --chown=user . .
 
-# 7. Streamlit'i dış dünyaya aç
-EXPOSE 8501
+# Kullanıcıya geçiş yap
+USER user
 
-# 8. Uygulamayı başlat
-CMD ["streamlit", "run", "streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+# Streamlit'i Hugging Face'in standart portu olan 7860'a ayarla
+EXPOSE 7860
+
+# Uygulamayı başlat (Portu 7860 yaparak)
+CMD ["streamlit", "run", "streamlit_app.py", "--server.port=7860", "--server.address=0.0.0.0"]
