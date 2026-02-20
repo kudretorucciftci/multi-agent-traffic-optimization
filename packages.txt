@@ -1,3 +1,2 @@
 sumo
-sumo-tools
-sumo-doc
+libgl1
