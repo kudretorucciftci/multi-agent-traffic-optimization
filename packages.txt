@@ -1,2 +1,2 @@
-sumo
-libgl1
+# Sistem paketleri çakışma yarattığı için bu dosyayı boş bırakıyoruz. 
+# Dashboard için gerekli tüm veriler CSV'lerden okunacak.
