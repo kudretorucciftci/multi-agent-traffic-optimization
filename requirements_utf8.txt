@@ -1,0 +1,13 @@
+﻿ray[rllib]==2.53.0
+traci==1.25.0
+sumolib==1.25.0
+numpy==2.4.1
+pandas==3.0.0
+matplotlib==3.10.8
+gymnasium==1.1.1
+pettingzoo==1.25.0
+torch
+stable_baselines3
+sumo-rl
+streamlit
+plotly

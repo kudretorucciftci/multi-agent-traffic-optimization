@@ -28,9 +28,12 @@ venv/
 
 # Data & Large Files
 *.csv
+!baseline_5000_metrics.csv
+!mega_v4_eval_metrics_5000.csv
 *.xml
 !maltepe.net.xml
 !istanbul_vtypes.add.xml
+venv_312/
 *.ipynb
 *.zip
 *.7z
