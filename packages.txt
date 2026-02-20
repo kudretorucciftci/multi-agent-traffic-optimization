@@ -1,5 +1,3 @@
 sumo
 sumo-tools
 sumo-doc
-libgdal-dev
-libxerces-c-dev
